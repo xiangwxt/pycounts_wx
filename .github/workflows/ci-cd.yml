@@ -1,4 +1,4 @@
-name: ci
+name: ci-cd
 
 on:
   # Trigger the workflow on push or pull request to main
