@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  # Trigger the workflow on push or pull request to main
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ci:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: 3.9
+        
+    steps:
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+    
+    - name: Checkout repository
+      uses: actions/checkout@v2
+  
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+    
+    - name: Install package
+      run: poetry install
+   
+    - name: Test with pytest
+      run: poetry run pytest tests/ --cov=pycounts_tb --cov-report=xml
+      
+    - name: Upload coverage to Codecov  
+      uses: codecov/codecov-action@v2
+      with:
+        file: ./coverage.xml    # coverage report
+        fail_ci_if_error: true
+
+    - name: Build documentation
+      run: poetry run make html --directory docs/
+  
+  cd:
+    needs: ci
+    
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    runs-on: ubuntu-latest
+    steps:
+    
+    - uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+    
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Disable admin branch protection
+      uses: benjefferies/branch-protection-bot@master
+      if: always()
+      with:
+          access-token: ${{ secrets.MYGIT_TOKEN }}
+          branch: main
+          enforce_admins: false
+          
+    # Use PSR to make release
+    - name: Python Semantic Release
+      run: |
+          pip install python-semantic-release
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          semantic-release publish
+          
+    - name: Enable admin branch protection
+      uses: benjefferies/branch-protection-bot@master
+      if: always()  # Force to always run this step to ensure "include administrators" is always turned back on
+      with:
+        access-token: ${{ secrets.MYGIT_TOKEN }}
+        branch: main
+        enforce_admins: true
+        
+    # Publish to TestPyPI
+    - uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: {% raw %}${{ secrets.TEST_PYPI_API_TOKEN }}{% endraw %}
+        repository_url: https://test.pypi.org/legacy/
+        skip_existing: true
+    
+    - name: Test install from TestPyPI
+      run: |
+          pip install \
+          --index-url https://test.pypi.org/simple/ \
+          --extra-index-url https://pypi.org/simple \
+          tweepypoll
+    # Step 7. Publish to PyPI
+    - uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        skip_existing: true
